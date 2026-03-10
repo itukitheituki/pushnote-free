@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // FCMトークン保存用コレクション
+    // 本番では認証を追加することを推奨
+    match /fcm_users/{docId} {
+      allow read, write: if true; // ⚠️ 個人・社内利用向け。公開サービスには認証を追加してください
+    }
+  }
+}

@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PushNote Free</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@300;400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+:root {
+  --bg: #0d0f0e;
+  --surface: #141714;
+  --surface2: #1b1e1b;
+  --border: #252825;
+  --border2: #2f332f;
+  --green: #4dff91;
+  --green-dim: rgba(77,255,145,0.12);
+  --green-glow: rgba(77,255,145,0.25);
+  --amber: #ffb84d;
+  --red: #ff6b6b;
+  --text: #e2e8e2;
+  --text2: #8a938a;
+  --text3: #4a524a;
+  --mono: 'Geist Mono', monospace;
+  --serif: 'Instrument Serif', serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Noto Sans JP', sans-serif;
+  font-weight: 300;
+  min-height: 100vh;
+  cursor: default;
+}
+
+/* Scanline overlay */
+body::before {
+  content:'';
+  position:fixed; inset:0; pointer-events:none; z-index:999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+}
+
+/* Terminal glow at top */
+body::after {
+  content:'';
+  position:fixed; top:0; left:0; right:0; height:1px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  z-index:10;
+  opacity:0.6;
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 40px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.logo {
+  font-family: var(--serif);
+  font-size: 42px;
+  color: var(--green);
+  letter-spacing: -1px;
+  line-height: 1;
+  text-shadow: 0 0 40px var(--green-glow);
+}
+
+.logo em { font-style: italic; color: var(--text2); }
+
+.header-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+  text-align: right;
+  line-height: 1.8;
+}
+
+/* ── Status bar ── */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 28px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text3);
+  flex-shrink: 0;
+  transition: background .3s;
+}
+.dot.on  { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2.5s infinite; }
+.dot.warn{ background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.dot.err { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── Alert box ── */
+.alert {
+  padding: 14px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.75;
+  margin-bottom: 20px;
+  font-family: var(--mono);
+}
+.alert-warn {
+  background: rgba(255,184,77,0.07);
+  border: 1px solid rgba(255,184,77,0.25);
+  color: #c89040;
+}
+.alert-info {
+  background: var(--green-dim);
+  border: 1px solid rgba(77,255,145,0.2);
+  color: #7ad8a0;
+}
+.alert a { color: var(--amber); }
+.alert code {
+  background: rgba(255,255,255,0.07);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+/* ── Section label ── */
+.label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.label::after { content:''; flex:1; height:1px; background: var(--border); }
+
+/* ── Panel ── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px;
+  margin-bottom: 16px;
+  transition: border-color .2s;
+}
+.panel:hover { border-color: var(--border2); }
+
+.panel-title {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-title .icon {
+  width: 26px; height: 26px;
+  border-radius: 5px;
+  background: var(--green-dim);
+  border: 1px solid rgba(77,255,145,0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+
+/* ── Grid inputs ── */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media(max-width:520px){ .grid2 { grid-template-columns: 1fr; } }
+
+.field { margin-bottom: 0; }
+.field label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text3);
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+input[type=text], input[type=email], textarea {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+input:focus, textarea:focus {
+  border-color: rgba(77,255,145,0.4);
+  box-shadow: 0 0 0 3px rgba(77,255,145,0.08);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text3);
+  font-size: 12px;
+}
+textarea { resize: vertical; min-height: 80px; }
+
+/* ── Buttons ── */
+.btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: 5px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: all .13s;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  letter-spacing: .3px;
+}
+
+.btn-ghost {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+}
+.btn-ghost:hover { border-color: var(--border2); color: var(--text); }
+
+.btn-add {
+  background: var(--green-dim);
+  border: 1px solid rgba(77,255,145,0.25);
+  color: var(--green);
+  padding: 10px 14px;
+}
+.btn-add:hover { background: rgba(77,255,145,0.18); }
+
+.btn-primary {
+  background: var(--green);
+  color: #050f08;
+  font-weight: 500;
+  width: 100%;
+  justify-content: center;
+  padding: 13px;
+  font-size: 14px;
+  border-radius: 6px;
+  box-shadow: 0 0 24px var(--green-glow);
+}
+.btn-primary:hover { background: #6dffaa; box-shadow: 0 0 32px var(--green-glow); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: .3; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.btn-perm {
+  background: rgba(255,184,77,0.12);
+  border: 1px solid rgba(255,184,77,0.3);
+  color: var(--amber);
+  width: 100%;
+  justify-content: center;
+  padding: 13px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+.btn-perm:hover { background: rgba(255,184,77,0.2); }
+
+/* ── Tags ── */
+.tag-area {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 10px;
+  min-height: 68px;
+  margin-bottom: 10px;
+}
+
+.tags { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px 4px 10px;
+  background: var(--green-dim);
+  border: 1px solid rgba(77,255,145,0.2);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  animation: pop .15s ease;
+}
+@keyframes pop { from{opacity:0;transform:scale(.8)} to{opacity:1;transform:scale(1)} }
+
+.tag-x {
+  background: none; border: none;
+  color: var(--text3); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0;
+  transition: color .1s;
+}
+.tag-x:hover { color: var(--red); }
+.tag-empty { font-family: var(--mono); font-size: 12px; color: var(--text3); }
+
+.input-row { display: flex; gap: 8px; }
+
+/* ── Token box ── */
+.token-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+  word-break: break-all;
+  line-height: 1.6;
+  margin: 12px 0 6px;
+}
+
+/* ── Divider ── */
+hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* ── Log ── */
+.log-entry {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  animation: fadeSlide .2s ease;
+}
+.log-entry:last-child { border-bottom: none; }
+@keyframes fadeSlide { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} }
+
+.log-sig { font-size: 13px; flex-shrink: 0; }
+.log-body { flex: 1; }
+.log-ttl  { font-size: 13px; color: var(--text); }
+.log-sub  { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-top: 2px; }
+.log-time { font-family: var(--mono); font-size: 11px; color: var(--text3); white-space: nowrap; }
+.log-empty{ font-family: var(--mono); font-size: 12px; color: var(--text3); padding: 20px 0; text-align: center; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed; bottom: 28px; left: 50%;
+  transform: translateX(-50%) translateY(14px);
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 11px 22px;
+  font-family: var(--mono);
+  font-size: 13px;
+  opacity: 0;
+  transition: all .25s;
+  pointer-events: none;
+  z-index: 1000;
+  white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+#perm-panel { display: none; }
+#send-panel { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">Push<em>Note</em></div>
+    <div class="header-meta">
+      Firebase FCM · Spark Plan<br>
+      No Cloud Functions
+    </div>
+  </header>
+
+  <!-- Status -->
+  <div class="statusbar">
+    <div class="dot" id="s-dot"></div>
+    <span id="s-text" style="font-size:12px;">初期化待ち...</span>
+  </div>
+
+  <!-- ① Firebase Config -->
+  <div class="label">Step 1 — Firebase設定</div>
+  <div class="panel">
+    <div class="panel-title"><div class="icon">🔑</div> firebaseConfig & VAPID Key</div>
+    <div class="alert alert-warn" style="margin-bottom:16px;">
+      ⚠️ <strong>セキュリティ注意：</strong> このアプリはサーバーキーをフロントに置く構成です。<strong>社内ツール・個人利用向け</strong>です。
+      公開サービスには <a href="https://vercel.com" target="_blank">Vercel</a> 等のサーバーレス関数を推奨します。
+    </div>
+    <div class="grid2" style="margin-bottom:10px;">
+      <div class="field"><label>API Key</label><input id="c-apikey" type="text" placeholder="AIza..."></div>
+      <div class="field"><label>Auth Domain</label><input id="c-authdomain" type="text" placeholder="xxx.firebaseapp.com"></div>
+      <div class="field"><label>Project ID</label><input id="c-projectid" type="text" placeholder="your-project-id"></div>
+      <div class="field"><label>Storage Bucket</label><input id="c-bucket" type="text" placeholder="xxx.appspot.com"></div>
+      <div class="field"><label>Messaging Sender ID</label><input id="c-senderid" type="text" placeholder="123456789012"></div>
+      <div class="field"><label>App ID</label><input id="c-appid" type="text" placeholder="1:xxx:web:xxx"></div>
+    </div>
+    <div class="field" style="margin-bottom:12px;">
+      <label>VAPID Key（ウェブプッシュ証明書）</label>
+      <input id="c-vapid" type="text" placeholder="BNXxxxx...（プロジェクトの設定 → Cloud Messaging → ウェブプッシュ証明書）">
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <label>FCM Server Key（レガシーキー）</label>
+      <input id="c-serverkey" type="text" placeholder="AAAAxxxxxxx...（プロジェクトの設定 → Cloud Messaging → サーバーキー）">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:5px;">
+        ※ Firebase Console → プロジェクトの設定 → Cloud Messaging タブ → 「Cloud Messaging API（レガシー）」を有効化して取得
+      </div>
+    </div>
+    <button class="btn btn-perm" id="btn-init" style="width:auto;">⚡ 初期化する</button>
+  </div>
+
+  <!-- ② Permission -->
+  <div id="perm-panel">
+    <div class="label">Step 2 — 通知の許可 & トークン登録</div>
+    <div class="panel">
+      <div class="panel-title"><div class="icon">🔔</div> このブラウザを受信端末として登録</div>
+      <div class="alert alert-info" style="margin-bottom:16px;">
+        受信したいブラウザ（スマホ含む）でこのページを開き、それぞれ「通知を許可」してください。
+        FCMトークンがFirestoreに保存されます。
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label>このブラウザに紐づけるメールアドレス</label>
+        <input id="reg-email" type="email" placeholder="user@example.com">
+      </div>
+      <button class="btn btn-perm" id="btn-reg">🔔 通知を許可してこのブラウザを登録</button>
+      <div id="token-area" style="display:none;">
+        <div class="token-box" id="token-val">—</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--green);">✓ Firestoreに保存済み</div>
+      </div>
+      <div id="denied-msg" style="display:none;margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--red);">
+        ❌ 通知がブロックされています。ブラウザ設定から「通知を許可」に変更してください。
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ Send -->
+  <div id="send-panel">
+    <div class="label">Step 3 — 通知を送る</div>
+
+    <!-- Recipients -->
+    <div class="panel">
+      <div class="panel-title"><div class="icon">📧</div> 送信先メールアドレス</div>
+      <div class="tag-area">
+        <div class="tags" id="tag-wrap">
+          <span class="tag-empty">メールアドレスを追加...</span>
+        </div>
+      </div>
+      <div class="input-row">
+        <input id="email-in" type="email" placeholder="user@example.com">
+        <button class="btn btn-add" id="btn-add">＋</button>
+      </div>
+    </div>
+
+    <!-- Message -->
+    <div class="panel">
+      <div class="panel-title"><div class="icon">✉️</div> 通知内容</div>
+      <div class="field" style="margin-bottom:12px;">
+        <label>タイトル *</label>
+        <input id="n-title" type="text" placeholder="例：新しいお知らせ">
+      </div>
+      <div class="field">
+        <label>本文</label>
+        <textarea id="n-body" placeholder="例：確認してください。"></textarea>
+      </div>
+      <hr>
+      <button class="btn btn-primary" id="btn-send" disabled>▶ Push通知を送信</button>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="label">送信ログ</div>
+  <div class="panel">
+    <div class="panel-title" style="margin-bottom:12px;">
+      <div class="icon">📋</div> 履歴
+      <button class="btn btn-ghost" id="btn-clr" style="padding:4px 10px;font-size:11px;margin-left:auto;">クリア</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──
+let db, messaging, serverKey, vapidKey;
+let recipients = [];
+let logs = [];
+
+// ── Init ──
+document.getElementById('btn-init').addEventListener('click', async () => {
+  const cfg = {
+    apiKey:            v('c-apikey'),
+    authDomain:        v('c-authdomain'),
+    projectId:         v('c-projectid'),
+    storageBucket:     v('c-bucket'),
+    messagingSenderId: v('c-senderid'),
+    appId:             v('c-appid'),
+  };
+  vapidKey  = v('c-vapid');
+  serverKey = v('c-serverkey');
+
+  if (!cfg.apiKey || !cfg.projectId || !vapidKey || !serverKey) {
+    toast('⚠️ 全フィールドを入力してください'); return;
+  }
+
+  try {
+    if (firebase.apps.length) await firebase.apps[0].delete();
+    firebase.initializeApp(cfg);
+    db        = firebase.firestore();
+    messaging = firebase.messaging();
+
+    setStatus('warn', 'Firebase初期化完了 — 通知の許可が必要です');
+    document.getElementById('perm-panel').style.display = 'block';
+    toast('✅ Firebase初期化しました');
+
+    // フォアグラウンド受信
+    messaging.onMessage(payload => {
+      const { title, body } = payload.notification || {};
+      if (Notification.permission === 'granted')
+        new Notification(title || '通知', { body, tag: 'pn-fg' });
+      addLog(title, '(このブラウザ受信)', 'ok');
+    });
+
+  } catch(e) {
+    toast('❌ ' + e.message); console.error(e);
+  }
+});
+
+// ── Register token ──
+document.getElementById('btn-reg').addEventListener('click', async () => {
+  const email = v('reg-email');
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    toast('⚠️ メールアドレスを入力してください'); return;
+  }
+
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') {
+    document.getElementById('denied-msg').style.display = 'block';
+    toast('❌ 通知が拒否されました'); return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.register('./firebase-messaging-sw.js');
+    const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: reg });
+
+    // Firestoreに保存
+    const docId = email.replace(/\./g, '_');
+    await db.collection('fcm_users').doc(docId).set({
+      email, token, updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    document.getElementById('token-val').textContent = token;
+    document.getElementById('token-area').style.display = 'block';
+    document.getElementById('send-panel').style.display = 'block';
+    setStatus('on', '登録完了 — 通知送信可能');
+    updateSendBtn();
+    toast('✅ 登録完了！');
+  } catch(e) {
+    toast('❌ ' + e.message); console.error(e);
+  }
+});
+
+// ── Recipients ──
+const emailIn = document.getElementById('email-in');
+
+function addEmail() {
+  const val = emailIn.value.trim();
+  if (!val) return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { toast('⚠️ 正しいメールアドレスを入力してください'); return; }
+  if (recipients.includes(val)) { toast('既に追加されています'); return; }
+  recipients.push(val);
+  renderTags();
+  emailIn.value = '';
+  updateSendBtn();
+}
+
+document.getElementById('btn-add').addEventListener('click', addEmail);
+emailIn.addEventListener('keydown', e => e.key === 'Enter' && addEmail());
+
+function removeEmail(r) {
+  recipients = recipients.filter(x => x !== r);
+  renderTags(); updateSendBtn();
+}
+window.removeEmail = removeEmail;
+
+function renderTags() {
+  const el = document.getElementById('tag-wrap');
+  if (!recipients.length) { el.innerHTML = '<span class="tag-empty">メールアドレスを追加...</span>'; return; }
+  el.innerHTML = recipients.map(r =>
+    `<span class="tag"><span>${esc(r)}</span><button class="tag-x" onclick="removeEmail('${esc(r)}')">✕</button></span>`
+  ).join('');
+}
+
+// ── Send ──
+const titleIn = document.getElementById('n-title');
+const bodyIn  = document.getElementById('n-body');
+const btnSend = document.getElementById('btn-send');
+
+function updateSendBtn() {
+  btnSend.disabled = !(recipients.length > 0 && titleIn.value.trim());
+}
+titleIn.addEventListener('input', updateSendBtn);
+bodyIn.addEventListener('input', updateSendBtn);
+
+btnSend.addEventListener('click', async () => {
+  const title = titleIn.value.trim();
+  const body  = bodyIn.value.trim();
+  if (!title || !recipients.length) return;
+
+  btnSend.disabled = true;
+  btnSend.textContent = '送信中...';
+
+  let ok = 0, fail = 0;
+
+  for (const email of recipients) {
+    // Firestoreからトークン取得
+    const docId = email.replace(/\./g, '_');
+    let token;
+    try {
+      const doc = await db.collection('fcm_users').doc(docId).get();
+      if (!doc.exists || !doc.data().token) {
+        toast(`⚠️ ${email} は未登録です`);
+        addLog(title, email, 'fail', '未登録');
+        fail++; continue;
+      }
+      token = doc.data().token;
+    } catch(e) {
+      addLog(title, email, 'fail', 'Firestore取得エラー');
+      fail++; continue;
+    }
+
+    // FCM Legacy API で送信
+    try {
+      const res = await fetch('https://fcm.googleapis.com/fcm/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'key=' + serverKey,
+        },
+        body: JSON.stringify({
+          to: token,
+          notification: { title, body },
+          data: { sentAt: new Date().toISOString() },
+        }),
+      });
+      const json = await res.json();
+      if (json.success === 1) {
+        addLog(title, email, 'ok');
+        ok++;
+      } else {
+        addLog(title, email, 'fail', json.results?.[0]?.error || '送信失敗');
+        fail++;
+      }
+    } catch(e) {
+      addLog(title, email, 'fail', e.message);
+      fail++;
+    }
+
+    await delay(150);
+  }
+
+  toast(`✅ ${ok}件送信${fail ? ` / ❌ ${fail}件失敗` : ''}`);
+  btnSend.textContent = '▶ Push通知を送信';
+  updateSendBtn();
+});
+
+// ── Log ──
+function addLog(title, email, status, note) {
+  logs.unshift({ title, email, status, note, ts: new Date() });
+  renderLog();
+}
+
+function renderLog() {
+  const el = document.getElementById('log');
+  if (!logs.length) { el.innerHTML = '<div class="log-empty">— ログなし —</div>'; return; }
+  el.innerHTML = logs.slice(0,30).map(l => `
+    <div class="log-entry">
+      <div class="log-sig">${l.status === 'ok' ? '✅' : '❌'}</div>
+      <div class="log-body">
+        <div class="log-ttl">${esc(l.title)}</div>
+        <div class="log-sub">→ ${esc(l.email)}${l.note ? ' — ' + esc(l.note) : ''}</div>
+      </div>
+      <div class="log-time">${fmt(l.ts)}</div>
+    </div>`).join('');
+}
+
+document.getElementById('btn-clr').addEventListener('click', () => { logs = []; renderLog(); });
+
+// ── Status ──
+function setStatus(type, msg) {
+  document.getElementById('s-dot').className = 'dot ' + (type === 'on' ? 'on' : type === 'warn' ? 'warn' : type === 'err' ? 'err' : '');
+  document.getElementById('s-text').textContent = msg;
+}
+
+// ── Helpers ──
+function v(id) { return document.getElementById(id).value.trim(); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(d) { return d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function delay(ms) { return new Promise(r => setTimeout(r,ms)); }
+
+let toastT;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// Init log
+renderLog();
+setStatus('', '設定を入力して初期化してください');
+</script>
+</body>
+</html>
